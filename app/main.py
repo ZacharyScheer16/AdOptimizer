@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from .model import run_clustering
 
 app = FastAPI()
 @app.get("/")
