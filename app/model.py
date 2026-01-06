@@ -73,3 +73,9 @@ def run_clustering(df):
         "group_insights": group_summary,
         "detailed_results": df.to_dict(orient="records")
     }
+
+def calculate_savings(results_df,  group_insights):
+    risky_ids = [int(gid) for gid, info in group_insights.items() if info["status"] == "Risky"]
+
+    total_waste = results_df[results_df['ad_group'].isin(risky_ids)]['Spend'].sum()
+    return total_waste
