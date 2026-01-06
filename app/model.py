@@ -46,7 +46,6 @@ def run_clustering(df):
             else:
                 label, status = "Stable", "Neutral"
                 rec = "Average performance. No changes needed."
-                
             group_insights[int(cluster_id)] = {
                 "label": label, "status": status,
                 "CPC": avg_cpc, "CTR": avg_ctr, "recommendation": rec
