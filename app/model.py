@@ -36,6 +36,10 @@ def run_clustering(df):
     # 6. Make Predictions
     df['ad_group'] = kmeans.labels_
 
+    # Calculatiung global AVG to compare against
+    avg_cpc = df['CPC'].mean()
+    avg_ctr = df['CTR'].mean()
+
     # --- NEW: ACCURACY & SUMMARY LOGIC ---
     
     # Calculate the clarity of the groups (Score: -1 to 1) [cite: 2025-10-11]
