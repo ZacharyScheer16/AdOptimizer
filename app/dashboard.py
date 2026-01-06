@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from model import run_clustering  # Logic from your model.py
+from model import run_clustering  # Importing your logic from model.py
 
 # 1. Professional Page Setup
 st.set_page_config(
@@ -11,13 +11,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. Custom CSS Fix for Visibility (No more white-on-white!)
+# 2. Custom CSS for Contrast and Readability
 st.markdown("""
     <style>
-    /* Main background */
     .main { background-color: #f8f9fa; }
     
-    /* Force Metric text to be Black/Dark Blue for readability */
+    /* Force Metric text to be Black/Dark Blue */
     [data-testid="stMetricValue"] {
         color: #1c2b46 !important;
         font-weight: bold !important;
@@ -26,7 +25,7 @@ st.markdown("""
         color: #495057 !important;
     }
     
-    /* Style the white metric cards */
+    /* Metric Card Styling */
     div[data-testid="column"] {
         background-color: #ffffff;
         padding: 20px;
@@ -34,46 +33,52 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
         border: 1px solid #e9ecef;
     }
-    
-    /* Clean up the Sidebar */
-    section[data-testid="stSidebar"] {
-        background-color: #1c2b46;
-        color: white;
-    }
-    section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] label {
-        color: white !important;
-    }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. Sidebar for Settings & User Info
+# 3. Sidebar
 with st.sidebar:
-    st.title("AdOptimizer v1.0")
-    st.markdown("---")
-    st.write("**User:** testuser@volleyball.com")
-    st.write("**System:** Logistics Software v2.5")
+    st.title("AdOptimizer v1.1")
+    st.image("https://cdn-icons-png.flaticon.com/512/1055/1055644.png", width=80)
+    st.write(f"**User:** testuser@volleyball.com") # Using your saved email
+    st.write("**Module:** Logistics Marketing")
     st.divider()
-    st.info("This AI segments ads into clusters based on efficiency metrics (CPC/CTR).")
+    st.info("AI-powered clustering identifies budget waste in real-time.")
 
 # 4. Main Header
 st.title("🎯 Marketing Intelligence Dashboard")
-uploaded_file = st.file_uploader("Upload marketing CSV (e.g., KAG_conversion_data.csv)", type="csv")
+uploaded_file = st.file_uploader("Upload Ad Export (CSV)", type="csv")
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    with st.spinner('Calculating Performance Clusters...'):
-        # results contains model_accuracy_score, group_insights, and detailed_results
+    with st.spinner('AI analyzing 1,000+ data points...'):
         results = run_clustering(df)
 
     if "error" in results:
         st.error(results["error"])
     else:
-        # 5. KPI Row (Now with readable text)
-        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-        kpi1.metric("Ads Analyzed", f"{len(df):,}")
-        kpi2.metric("Avg. CPC", f"${df['CPC'].mean():.2f}")
-        kpi3.metric("Avg. CTR", f"{df['CTR'].mean():.3%}")
-        kpi4.metric("AI Confidence", f"{results['model_accuracy_score']:.1%}")
+        # --- DATA PREP ---
+        results_df = pd.DataFrame(results["detailed_results"])
+        
+        # 1. THE LIST COMPREHENSION: Identify risky groups
+        # This converts string keys to integers to match the DataFrame
+        risky_group_ids = [
+            int(gid) for gid, info in results["group_insights"].items() 
+            if info["status"] == "Risky"
+        ]
+        
+        # 2. CALCULATE SAVINGS: Sum the 'Spend' of ads in those risky groups
+        potential_savings = results_df[results_df['ad_group'].isin(risky_group_ids)]['Spend'].sum()
+
+        # 5. KPI Row (Now with 5 columns)
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.metric("Ads Analyzed", f"{len(df):,}")
+        k2.metric("Avg. CPC", f"${df['CPC'].mean():.2f}")
+        k3.metric("Avg. CTR", f"{df['CTR'].mean():.3%}")
+        k4.metric("AI Confidence", f"{results['model_accuracy_score']:.1%}")
+        
+        # Highlight the savings in a "Positive" green delta even though it's a reduction in cost
+        k5.metric("Potential Savings", f"${potential_savings:,.2f}", delta="Budget Waste", delta_color="inverse")
 
         st.divider()
 
@@ -86,35 +91,26 @@ if uploaded_file:
             
             for i, (group_id, stats) in enumerate(results["group_insights"].items()):
                 with cols[i]:
-                    # Color logic for labels
                     status_color = "green" if stats['status'] == "Scalable" else "red" if stats['status'] == "Risky" else "orange"
-                    
                     st.markdown(f"### Group {group_id}")
                     st.markdown(f":{status_color}[**{stats['label'].upper()}**]")
                     st.write(f"**Avg CPC:** ${stats['CPC']:.2f}")
                     st.write(f"**Avg CTR:** {stats['CTR']:.4%}")
                     st.info(f"💡 {stats['recommendation']}")
             
-            # Interactive Chart
+            # Interactive Plotly Chart
             st.divider()
             st.subheader("Spend vs. Efficiency Map")
-            results_df = pd.DataFrame(results["detailed_results"])
             fig = px.scatter(results_df, x="Spend", y="CPC", color="ad_group", 
-                             size="Impressions", hover_data=['ad_id'],
-                             title="Efficiency Clustering (Hover for Ad Details)",
+                             size="Clicks", hover_data=['ad_id'],
+                             title="Efficiency Clusters (Bubble size = Clicks)",
                              template="plotly_white")
             st.plotly_chart(fig, use_container_width=True)
 
         with tab2:
             st.subheader("🔍 Individual Performance Audit")
             
-            # Filter logic: Looking for 'Risky' status in group_insights
-            risky_group_ids = [
-                int(gid) for gid, info in results["group_insights"].items() 
-                if info["status"] == "Risky"
-            ]
-            
-            # Filter the main results dataframe
+            # Filter the main results dataframe for the audit list
             audit_df = results_df[results_df['ad_group'].isin(risky_group_ids)]
 
             if not audit_df.empty:
@@ -128,10 +124,10 @@ if uploaded_file:
                     use_container_width=True
                 )
             else:
-                st.success("✅ No 'Risky' ads found. All segments are performing optimally.")
+                st.success("✅ No 'Risky' ads found. Performance is optimal.")
 
         with tab3:
-            st.subheader("All Analyzed Data")
+            st.subheader("Full Dataset Table")
             st.dataframe(results_df, use_container_width=True)
 else:
-    st.info("Please upload a CSV file to begin the AI analysis.")
+    st.info("Ready for analysis. Please upload your CSV file.")
