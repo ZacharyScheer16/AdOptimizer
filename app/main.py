@@ -1,21 +1,35 @@
-from fastapi import FastAPI, UploadFile, File
-from .model import run_clustering
-import pandas as pd
+import os
 import io
+import pandas as pd
+from datetime import datetime
+from fastapi import FastAPI, UploadFile, File
+from tinydb import TinyDB, Query
+
+# Import your AI logic
+from .model import run_clustering
+
+# --- DATABASE SETUP ---
+# This ensures the database file is always in the same folder as this script
+current_dir = os.path.dirname(os.path.abspath(__file__))
+db_path = os.path.join(current_dir, 'audit_history.json')
+db = TinyDB(db_path)
 
 app = FastAPI()
+
 @app.get("/")
 async def home():
-    return {"message": "Welcome to the AdOptimizer API!"}
+    return {
+        "message": "Welcome to the AdOptimizer API!",
+        "database_location": db_path
+    }
 
-
+# --- ENDPOINT 1: AI ANALYSIS ---
 @app.post("/upload-logistics")
 async def upload_data(file: UploadFile = File(...)):
     # 1. Read the raw bytes
     contents = await file.read()
     
     # 2. Turn bytes into a table (DataFrame)
-    # We use io.BytesIO(contents) to make the bytes look like a file
     df = pd.read_csv(io.BytesIO(contents))
     
     # 3. Use your model!
@@ -26,3 +40,27 @@ async def upload_data(file: UploadFile = File(...)):
         "ad_analyzed": len(df),
         "analysis": result
     }
+
+# --- ENDPOINT 2: SAVE TO HISTORY ---
+@app.post("/save-audit")
+async def save_audit(data: dict):
+    try:
+        # Add the timestamp for logistics tracking
+        data["Timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Insert into TinyDB
+        entry_id = db.insert(data)
+
+        return {
+            "status": "success", 
+            "entry_id": entry_id, 
+            "saved_data": data
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# --- ENDPOINT 3: RETRIEVE HISTORY ---
+@app.get("/history")
+async def get_history():
+    # Returns all saved audits for the Streamlit History Tab
+    return db.all()
