@@ -4,6 +4,7 @@ import plotly.express as px
 import requests
 from datetime import datetime
 
+
 st.set_page_config(page_title="AdOptimizer AI", layout="wide", page_icon="🎯")
 
 # --- UI STYLING ---
