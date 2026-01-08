@@ -80,3 +80,16 @@ async def signup(data: dict):
         return {"status": "success", "message": "User registered successfully."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+    
+# --- ENDPOINT 5 User login ---
+@app.post("/login")
+async def login(data:dict):
+    try:
+        User = Query()
+        user = user_table.get(User.username == data["username"])
+        if user and user['password'] == data['password']:
+            return {"status": "success", "message": "Login successful."}
+        else:
+            return{"status": "error", "message": "Invalid username or password."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
