@@ -67,3 +67,16 @@ async def save_audit(data: dict):
 async def get_history():
     # Returns all saved audits for the Streamlit History Tab
     return db.all()
+
+# --- ENDPOINT 4 User signup ---
+@app.post("/signup")
+async def signup(data: dict):
+    try:
+        User = Query()
+        existing_user = user_table.get(User.username == data["username"])
+        if existing_user:
+            return {"status": "error", "message": "Username already exists."}
+        user_table.insert(data)
+        return {"status": "success", "message": "User registered successfully."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
