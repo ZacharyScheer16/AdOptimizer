@@ -10,9 +10,12 @@ from .model import run_clustering
 
 # --- DATABASE SETUP ---
 # This ensures the database file is always in the same folder as this script
+db = TinyDB('database.json')
 current_dir = os.path.dirname(os.path.abspath(__file__))
-db_path = os.path.join(current_dir, 'audit_history.json')
-db = TinyDB(db_path)
+db_path = os.path.join(current_dir, 'database.json')
+audits_table = db.table('audits')
+user_table = db.table('users')
+
 
 app = FastAPI()
 
