@@ -5,11 +5,13 @@ import requests
 from datetime import datetime
 
 # --- 1. SESSION STATE INITIALIZATION ---
-# This acts as the "ID Badge" to remember if a user is logged in
+# user_id is now critical for the SQL foreign key relationship
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'username' not in st.session_state:
     st.session_state.username = ""
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = None
 
 st.set_page_config(page_title="AdOptimizer AI", layout="wide", page_icon="🎯")
 
@@ -28,7 +30,7 @@ st.markdown("""
 # --- 3. AUTHENTICATION FUNCTION ---
 def show_auth_page():
     st.title("🔐 AdOptimizer Secure Access")
-    st.write("Please log in to access the Logistics Module.")
+    st.write("Please log in to access your SQL-backed Logistics Module.")
     
     auth_tab, signup_tab = st.tabs(["Login", "Create Account"])
     
@@ -39,12 +41,13 @@ def show_auth_page():
         if st.button("Sign In", type="primary", use_container_width=True):
             payload = {"username": user, "password": pwd}
             try:
-                # Talking to Endpoint 5 in your FastAPI
                 res = requests.post("http://127.0.0.1:8000/login", json=payload)
                 data = res.json()
                 if data.get("status") == "success":
                     st.session_state.logged_in = True
                     st.session_state.username = user
+                    # Store the ID returned from SQL
+                    st.session_state.user_id = data.get("user_id")
                     st.rerun() 
                 else:
                     st.error(data.get("message", "Invalid credentials."))
@@ -59,7 +62,6 @@ def show_auth_page():
         if st.button("Register Account", use_container_width=True):
             payload = {"username": new_user, "password": new_pass}
             try:
-                # Talking to Endpoint 4 in your FastAPI
                 res = requests.post("http://127.0.0.1:8000/signup", json=payload)
                 data = res.json()
                 if data.get("status") == "success":
@@ -72,38 +74,32 @@ def show_auth_page():
 # --- 4. THE GATEKEEPER ---
 if not st.session_state.logged_in:
     show_auth_page()
-    st.stop() # Prevents the rest of the dashboard from loading
+    st.stop() 
 
-# --- 5. DASHBOARD CONTENT (Only runs if logged_in is True) ---
-
-# --- SIDEBAR ---
+# --- 5. DASHBOARD CONTENT ---
 with st.sidebar:
-    st.title("AdOptimizer v1.0")
-    st.write(f"✅ **Logged in as:** {st.session_state.username}")
+    st.title("AdOptimizer SQL")
+    st.write(f"✅ **User:** {st.session_state.username}")
+    st.write(f"🆔 **ID:** {st.session_state.user_id}")
     
     if st.button("🚪 Logout", use_container_width=True):
-        st.session_state.logged_in = False
-        st.session_state.username = ""
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.rerun()
         
     st.divider()
-    st.info("Logistics Module: High-Confidence Audit")
-    
-    if st.button("🔄 Refresh Data"):
-        st.rerun()
+    st.info("Storage: SQLite (adoptimizer.db)")
 
 st.title("🎯 Marketing Intelligence Dashboard")
 
-# --- TABS SETUP ---
-main_tab, audit_tab, history_tab = st.tabs(["📊 Executive Summary", "🔍 Detailed Audit", "📜 Audit History"])
+main_tab, audit_tab, history_tab = st.tabs(["📊 Executive Summary", "🔍 Detailed Audit", "📜 My History"])
 
 with main_tab:
     uploaded_file = st.file_uploader("Upload Ad CSV", type="csv")
 
     if uploaded_file:
-        with st.spinner('Analyzing Logistics Data...'):
+        with st.spinner('AI Clustering in progress...'):
             try:
-                # 1. POST file to FastAPI
                 files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "text/csv")}
                 response = requests.post("http://127.0.0.1:8000/upload-logistics", files=files)
                 
@@ -112,7 +108,7 @@ with main_tab:
                     results = full_payload["analysis"]
                     results_df = pd.DataFrame(results["detailed_results"])
                     
-                    # --- METRICS CALCULATION ---
+                    # Calculations
                     risky_ids = [int(gid) for gid, info in results["group_insights"].items() if info["status"] == "Risky"]
                     total_spend = float(results_df['Spend'].sum())
                     potential_savings = float(results_df[results_df['ad_group'].isin(risky_ids)]['Spend'].sum())
@@ -122,78 +118,58 @@ with main_tab:
                     m2.metric("Avg CPC", f"${results_df['CPC'].mean():.2f}")
                     m3.metric("Avg CTR", f"{results_df['CTR'].mean():.3%}")
                     m4.metric("AI Confidence", f"{results['model_accuracy_score']:.1%}")
-                    m5.metric("Potential Savings", f"${potential_savings:,.2f}", delta="Waste Identified", delta_color="inverse")
+                    m5.metric("Waste Found", f"${potential_savings:,.2f}")
 
                     st.divider()
 
-                    # --- THE SAVE LOGIC ---
-                    st.subheader("Finalize Audit")
-                    col_btn, col_txt = st.columns([1, 2])
-                    
-                    with col_txt:
-                        st.write(f"**Ready to log:** `{uploaded_file.name}`")
-                        st.write(f"Total identified waste to be tracked: **${potential_savings:,.2f}**")
-
-                    with col_btn:
-                        audit_summary = {
-                            "filename": uploaded_file.name,
-                            "total_spend": total_spend,
-                            "potential_savings": potential_savings,
-                            "ads_count": len(results_df)
-                        }
-                        
-                        if st.button("💾 Save Audit to History", type="primary"):
-                            save_res = requests.post("http://127.0.0.1:8000/save-audit", json=audit_summary)
+                    # --- NEW SQL SAVE LOGIC ---
+                    st.subheader("Finalize SQL Audit")
+                    c1, c2 = st.columns([1, 2])
+                    with c1:
+                        if st.button("💾 Save to My Account", type="primary", use_container_width=True):
+                            # We send the user_id so SQL knows who owns this record
+                            audit_payload = {
+                                "filename": uploaded_file.name,
+                                "total_spend": total_spend,
+                                "potential_savings": potential_savings,
+                                "user_id": st.session_state.user_id 
+                            }
+                            save_res = requests.post("http://127.0.0.1:8000/save-audit", json=audit_payload)
                             if save_res.status_code == 200:
-                                st.success(f"Audit Logged! ID: {save_res.json().get('entry_id')}")
+                                st.success(f"Audit Saved to SQLite!")
                             else:
-                                st.error("Save Failed.")
+                                st.error("Save failed.")
+                    with c2:
+                        st.info(f"Linking this audit to User ID: {st.session_state.user_id}")
 
-                    st.divider()
-
-                    # --- PERFORMANCE VISUALS ---
-                    st.subheader("AI Performance Segments")
-                    cols = st.columns(len(results["group_insights"]))
-                    for i, (group_id, stats) in enumerate(results["group_insights"].items()):
-                        with cols[i]:
-                            color = "red" if stats['status'] == "Risky" else "green"
-                            st.markdown(f"### Group {group_id}")
-                            st.markdown(f":{color}[**{stats['label'].upper()}**]")
-                            st.write(f"**CPC:** ${stats['CPC']:.2f}")
-                            st.write(f"**CTR:** {stats['CTR']:.3%}")
-                    
-                    fig = px.scatter(results_df, x="Spend", y="CPC", color="ad_group", size="Clicks", template="plotly_white")
+                    # Performance charts
+                    fig = px.scatter(results_df, x="Spend", y="CPC", color="ad_group", template="plotly_white", title="Spend vs Cost-Per-Click")
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # --- POPULATE AUDIT TAB ---
                     with audit_tab:
-                        st.subheader("Waste Audit (High Priority Items)")
-                        audit_df = results_df[results_df['ad_group'].isin(risky_ids)]
-                        if not audit_df.empty:
-                            st.dataframe(audit_df, use_container_width=True)
-                        else:
-                            st.success("No risky ads detected in this dataset.")
+                        st.subheader("Waste Analysis")
+                        st.dataframe(results_df[results_df['ad_group'].isin(risky_ids)], use_container_width=True)
                 
-                else:
-                    st.error(f"Error from FastAPI: {response.text}")
-                    
-            except requests.exceptions.ConnectionError:
-                st.error("FRONTEND CANNOT FIND BACKEND: Is uvicorn running?")
+            except Exception as e:
+                st.error(f"Analysis failed: {e}")
 
-# --- HISTORY TAB ---
 with history_tab:
-    st.subheader("Database Audit Logs")
+    st.subheader(f"Personal Audit History for {st.session_state.username}")
     try:
-        history_response = requests.get("http://127.0.0.1:8000/history")
-        if history_response.status_code == 200:
-            history_data = history_response.json()
+        # We now query the personalized history endpoint
+        history_url = f"http://127.0.0.1:8000/history/{st.session_state.user_id}"
+        h_res = requests.get(history_url)
+        
+        if h_res.status_code == 200:
+            history_data = h_res.json()
             if history_data:
                 h_df = pd.DataFrame(history_data)
-                available_cols = ["Timestamp", "filename", "total_spend", "potential_savings", "ads_count"]
-                display_cols = [c for c in available_cols if c in h_df.columns]
+                # Cleaning up display
+                if 'timestamp' in h_df.columns:
+                    h_df['timestamp'] = pd.to_datetime(h_df['timestamp']).dt.strftime('%Y-%m-%d %H:%M')
                 
-                st.dataframe(h_df[display_cols].sort_values(by="Timestamp", ascending=False), use_container_width=True)
+                st.dataframe(h_df[["timestamp", "filename", "total_spend", "potential_savings"]].sort_values("timestamp", ascending=False), use_container_width=True)
             else:
-                st.info("The history is currently empty. Save an audit to see it here.")
+                st.info("No saved audits yet.")
     except Exception as e:
-        st.error(f"Could not load history: {e}")
+        st.error(f"History connection error: {e}")
