@@ -5,7 +5,6 @@ import requests
 from datetime import datetime
 
 # --- 1. SESSION STATE INITIALIZATION ---
-# user_id is now critical for the SQL foreign key relationship
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'username' not in st.session_state:
@@ -41,18 +40,18 @@ def show_auth_page():
         if st.button("Sign In", type="primary", use_container_width=True):
             payload = {"username": user, "password": pwd}
             try:
-                res = requests.post("http://127.0.0.1:8000/login", json=payload)
+                # Docker internal URL: http://backend:8000
+                res = requests.post("http://backend:8000/login", json=payload)
                 data = res.json()
                 if data.get("status") == "success":
                     st.session_state.logged_in = True
                     st.session_state.username = user
-                    # Store the ID returned from SQL
                     st.session_state.user_id = data.get("user_id")
                     st.rerun() 
                 else:
                     st.error(data.get("message", "Invalid credentials."))
             except Exception:
-                st.error("Backend Error: Is uvicorn running?")
+                st.error("Backend Error: Is the backend container running?")
 
     with signup_tab:
         st.subheader("Register New User")
@@ -62,14 +61,15 @@ def show_auth_page():
         if st.button("Register Account", use_container_width=True):
             payload = {"username": new_user, "password": new_pass}
             try:
-                res = requests.post("http://127.0.0.1:8000/signup", json=payload)
+                # Docker internal URL: http://backend:8000
+                res = requests.post("http://backend:8000/signup", json=payload)
                 data = res.json()
                 if data.get("status") == "success":
                     st.success("Account created! You can now switch to the Login tab.")
                 else:
                     st.error(data.get("message", "Signup failed."))
             except Exception:
-                st.error("Backend connection lost.")
+                st.error("Backend connection lost. Check Docker logs.")
 
 # --- 4. THE GATEKEEPER ---
 if not st.session_state.logged_in:
@@ -88,7 +88,7 @@ with st.sidebar:
         st.rerun()
         
     st.divider()
-    st.info("Storage: SQLite (adoptimizer.db)")
+    st.info("Storage: SQLite (Internal Container)")
 
 st.title("🎯 Marketing Intelligence Dashboard")
 
@@ -101,14 +101,14 @@ with main_tab:
         with st.spinner('AI Clustering in progress...'):
             try:
                 files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "text/csv")}
-                response = requests.post("http://127.0.0.1:8000/upload-logistics", files=files)
+                # Docker internal URL: http://backend:8000
+                response = requests.post("http://backend:8000/upload-logistics", files=files)
                 
                 if response.status_code == 200:
                     full_payload = response.json()
                     results = full_payload["analysis"]
                     results_df = pd.DataFrame(results["detailed_results"])
                     
-                    # Calculations
                     risky_ids = [int(gid) for gid, info in results["group_insights"].items() if info["status"] == "Risky"]
                     total_spend = float(results_df['Spend'].sum())
                     potential_savings = float(results_df[results_df['ad_group'].isin(risky_ids)]['Spend'].sum())
@@ -122,27 +122,25 @@ with main_tab:
 
                     st.divider()
 
-                    # --- NEW SQL SAVE LOGIC ---
                     st.subheader("Finalize SQL Audit")
                     c1, c2 = st.columns([1, 2])
                     with c1:
                         if st.button("💾 Save to My Account", type="primary", use_container_width=True):
-                            # We send the user_id so SQL knows who owns this record
                             audit_payload = {
                                 "filename": uploaded_file.name,
                                 "total_spend": total_spend,
                                 "potential_savings": potential_savings,
                                 "user_id": st.session_state.user_id 
                             }
-                            save_res = requests.post("http://127.0.0.1:8000/save-audit", json=audit_payload)
+                            # Docker internal URL: http://backend:8000
+                            save_res = requests.post("http://backend:8000/save-audit", json=audit_payload)
                             if save_res.status_code == 200:
-                                st.success(f"Audit Saved to SQLite!")
+                                st.success(f"Audit Saved!")
                             else:
                                 st.error("Save failed.")
                     with c2:
                         st.info(f"Linking this audit to User ID: {st.session_state.user_id}")
 
-                    # Performance charts
                     fig = px.scatter(results_df, x="Spend", y="CPC", color="ad_group", template="plotly_white", title="Spend vs Cost-Per-Click")
                     st.plotly_chart(fig, use_container_width=True)
 
@@ -156,19 +154,26 @@ with main_tab:
 with history_tab:
     st.subheader(f"Personal Audit History for {st.session_state.username}")
     try:
-        # We now query the personalized history endpoint
-        history_url = f"http://127.0.0.1:8000/history/{st.session_state.user_id}"
+        # Docker internal URL: http://backend:8000
+        history_url = f"http://backend:8000/history/{st.session_state.user_id}"
         h_res = requests.get(history_url)
         
         if h_res.status_code == 200:
             history_data = h_res.json()
             if history_data:
-                h_df = pd.DataFrame(history_data)
-                # Cleaning up display
-                if 'timestamp' in h_df.columns:
-                    h_df['timestamp'] = pd.to_datetime(h_df['timestamp']).dt.strftime('%Y-%m-%d %H:%M')
-                
-                st.dataframe(h_df[["timestamp", "filename", "total_spend", "potential_savings"]].sort_values("timestamp", ascending=False), use_container_width=True)
+                for item in history_data:
+                    with st.container(border=True):
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        col1.write(f"📄 **{item['filename']}**")
+                        ts = pd.to_datetime(item['timestamp']).strftime('%Y-%m-%d %H:%M')
+                        col1.caption(f"Date: {ts}")
+                        col2.metric("Waste", f"${item['potential_savings']:,.2f}")
+                        
+                        if col3.button("🗑️ Delete", key=f"del_{item['id']}"):
+                            # Practice SQL Delete via Docker URL
+                            del_res = requests.delete(f"http://backend:8000/delete-audit/{item['id']}")
+                            if del_res.status_code == 200:
+                                st.rerun()
             else:
                 st.info("No saved audits yet.")
     except Exception as e:
