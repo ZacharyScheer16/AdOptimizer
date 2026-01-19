@@ -5,102 +5,96 @@ from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-# Import our new Modular pieces
 from . import models, security
 from .database import engine, get_db, Base
-from .model import run_clustering # Your AI logic
+from .model import run_clustering, calculate_savings
 
-# --- DATABASE SETUP ---
-# This "Master Switch" creates the .db file and tables based on models.py
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-@app.get("/")
-async def home():
-    return {
-        "message": "Welcome to the AdOptimizer SQL API!",
-        "status": "Running",
-        "database": "SQLite (adoptimizer.db)"
-    }
-
-# --- ENDPOINT 1: AI ANALYSIS ---
+# --- ENDPOINT 1: UPLOAD & AUTO-SAVE ---
 @app.post("/upload-logistics")
-async def upload_data(file: UploadFile = File(...)):
-    contents = await file.read()
-    df = pd.read_csv(io.BytesIO(contents))
-    
-    # Run your clustering model logic
-    result = run_clustering(df)
-    
-    return {
-        "filename": file.filename,
-        "ad_analyzed": len(df),
-        "analysis": result
-    }
-
-# --- ENDPOINT 2: SAVE TO HISTORY (SQL Version) ---
-@app.post("/save-audit")
-async def save_audit(data: dict, db: Session = Depends(get_db)):
+async def upload_data(
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
     try:
-        # Create a new Audit object using the SQL model
-        new_audit = models.Audit(
-            filename=data["filename"],
-            total_spend=data["total_spend"],
-            potential_savings=data["potential_savings"],
-            # Note: timestamp is handled automatically by the model's default
-            user_id=data.get("user_id") 
-        )
+        contents = await file.read()
+        df = pd.read_csv(io.BytesIO(contents))
         
+        # 1. AI Analysis
+        result = run_clustering(df)
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+
+        # 2. Calculate Values
+        savings_value = calculate_savings(df, result.get("group_insights", {}))
+        total_spend_value = float(df['Spend'].sum())
+
+        # 3. Create & Save Record (The "Save" logic is now here!)
+        new_audit = models.Audit(
+            filename=file.filename,
+            total_spend=total_spend_value,
+            potential_savings=float(savings_value),
+            user_id=current_user.id
+        )
         db.add(new_audit)
         db.commit()
         db.refresh(new_audit)
 
         return {
-            "status": "success", 
-            "entry_id": new_audit.id, 
-            "message": "Audit saved to SQL database."
+            "status": "success",
+            "database_id": new_audit.id,
+            "analysis": result,
+            "summary": {"total_spend": total_spend_value, "savings": savings_value}
         }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
-# --- ENDPOINT 3: RETRIEVE HISTORY (SQL Version) ---
+# --- ENDPOINT 2: SECURE HISTORY ---
 @app.get("/history")
-async def get_history(db: Session = Depends(get_db)):
-    # This replaces db.all()
-    audits = db.query(models.Audit).all()
-    return audits
+async def get_history(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    # This filters the database so users only see their own folders
+    return db.query(models.Audit).filter(models.Audit.user_id == current_user.id).all()
 
-# --- ENDPOINT 4: USER SIGNUP (SECURE) ---
+# --- ENDPOINT 3: DELETE AUDIT ---
+@app.delete("/delete-audit/{audit_id}")
+async def delete_audit(
+    audit_id: int, 
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    audit = db.query(models.Audit).filter(
+        models.Audit.id == audit_id, 
+        models.Audit.user_id == current_user.id
+    ).first()
+    
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found or unauthorized")
+    
+    db.delete(audit)
+    db.commit()
+    return {"message": "Deleted successfully"}
+
+# --- AUTH ENDPOINTS (SIGNUP/LOGIN) ---
 @app.post("/signup")
 async def signup(data: dict, db: Session = Depends(get_db)):
-    # 1. Check if user already exists
-    existing_user = db.query(models.User).filter(models.User.username == data["username"]).first()
-    if existing_user:
-        return {"status": "error", "message": "Username already exists."}
-    
-    # 2. Hash the password
-    hashed_password = security.hash_password(data["password"])
-    
-    # 3. Create and save user
-    new_user = models.User(username=data["username"], hashed_password=hashed_password)
+    hashed_pwd = security.hash_password(data["password"])
+    new_user = models.User(username=data["username"], hashed_password=hashed_pwd)
     db.add(new_user)
     db.commit()
-    
-    return {"status": "success", "message": "User registered successfully."}
-    
-# --- ENDPOINT 5: USER LOGIN (SECURE) ---
+    return {"status": "success"}
+
 @app.post("/login")
 async def login(data: dict, db: Session = Depends(get_db)):
-    # 1. Find user by username
     user = db.query(models.User).filter(models.User.username == data["username"]).first()
-    
-    # 2. Verify password attempt against stored hash
     if user and security.verify_password(data["password"], user.hashed_password):
-        return {
-            "status": "success", 
-            "message": "Login successful.",
-            "user_id": user.id # Send this back so Streamlit can use it for history
-        }
-    else:
-        return {"status": "error", "message": "Invalid username or password."}
+        # We return a TOKEN now, not just a success message
+        token = security.create_access_token(data={"sub": user.username})
+        return {"status": "success", "access_token": token, "token_type": "bearer"}
+    raise HTTPException(status_code=401, detail="Invalid credentials")
