@@ -84,17 +84,40 @@ async def delete_audit(
 # --- AUTH ENDPOINTS (SIGNUP/LOGIN) ---
 @app.post("/signup")
 async def signup(data: dict, db: Session = Depends(get_db)):
+    # Simple check to prevent crashes if keys are missing
+    if "username" not in data or "password" not in data:
+        raise HTTPException(status_code=400, detail="Username and password are required")
+        
     hashed_pwd = security.hash_password(data["password"])
     new_user = models.User(username=data["username"], hashed_password=hashed_pwd)
     db.add(new_user)
     db.commit()
     return {"status": "success"}
 
+from fastapi.security import OAuth2PasswordRequestForm
+
 @app.post("/login")
-async def login(data: dict, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.username == data["username"]).first()
-    if user and security.verify_password(data["password"], user.hashed_password):
-        # We return a TOKEN now, not just a success message
+async def login(
+    form_data: OAuth2PasswordRequestForm = Depends(), # Changed from data: dict
+    db: Session = Depends(get_db)
+):
+    # Use form_data.username instead of data["username"]
+    user = db.query(models.User).filter(models.User.username == form_data.username).first()
+    
+    if user and security.verify_password(form_data.password, user.hashed_password):
         token = security.create_access_token(data={"sub": user.username})
-        return {"status": "success", "access_token": token, "token_type": "bearer"}
+        return {"access_token": token, "token_type": "bearer"} # Removed "status" to follow OAuth2 standard
+        
     raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
+@app.get("/user/profile")
+async def get_profile(
+    current_user: models.User = Depends(security.get_current_user)
+):
+    return {
+        "username": current_user.username, 
+        "id": current_user.id, 
+        "joined": current_user.created_at,
+        "audit_count": len(current_user.audits) # This now works because of your relationship
+    }
