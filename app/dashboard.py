@@ -160,13 +160,13 @@ with history_tab:
                         col1.caption(f"Audit Date: {ts}")
                         col2.metric("Waste Identified", f"${item['potential_savings']:,.2f}")
                         
-                        if col3.button("🗑️ Delete", key=f"del_{item['id']}"):
+                        '''if col3.button("🗑️ Delete", key=f"del_{item['id']}"):
                             del_res = requests.delete(
                                 f"http://backend:8000/delete-audit/{item['id']}", 
                                 headers=get_auth_header()
                             )
                             if del_res.status_code == 200:
-                                st.rerun()
+                                st.rerun()'''
             else:
                 st.info("No saved audits yet. Upload a file to start!")
         else:
