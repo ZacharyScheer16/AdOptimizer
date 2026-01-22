@@ -81,6 +81,26 @@ async def delete_audit(
     db.commit()
     return {"message": "Deleted successfully"}
 
+
+@app.patch("/rename-audit/{audit_id}")
+async def rename_audit(
+    audit_id: int,
+    new_name: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    audit = db.query(models.Audit).filter(
+        models.Audit.id == audit_id,
+        models.Audit.user_id == current_user.id
+    ).first()
+
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found or unauthorized")
+    
+    audit.filename = new_name
+    db.commit()
+    return {"message": "Renamed successfully"}
+
 # --- AUTH ENDPOINTS (SIGNUP/LOGIN) ---
 @app.post("/signup")
 async def signup(data: dict, db: Session = Depends(get_db)):
