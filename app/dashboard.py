@@ -43,17 +43,13 @@ def show_auth_page():
         pwd = st.text_input("Password", type="password", key="login_pwd")
         
         if st.button("Sign In", type="primary", use_container_width=True):
-            # IMPORTANT: OAuth2PasswordRequestForm expects Form Data, not JSON
             payload = {"username": user, "password": pwd}
             try:
-                # We use 'data=' for form-encoded instead of 'json='
                 res = requests.post("http://backend:8000/login", data=payload)
-                
                 if res.status_code == 200:
                     data = res.json()
                     st.session_state.logged_in = True
                     st.session_state.username = user
-                    # Your backend returns 'access_token'
                     st.session_state.token = data.get("access_token")
                     st.rerun() 
                 else:
@@ -69,7 +65,6 @@ def show_auth_page():
         if st.button("Register Account", use_container_width=True):
             payload = {"username": new_user, "password": new_pass}
             try:
-                # Signup still expects JSON based on your backend @app.post("/signup")
                 res = requests.post("http://backend:8000/signup", json=payload)
                 data = res.json()
                 if res.status_code == 200 and data.get("status") == "success":
@@ -155,15 +150,31 @@ with history_tab:
             if history_data:
                 for item in reversed(history_data):
                     with st.container(border=True):
-                        col1, col2, col3 = st.columns([3, 1, 1])
-                        col1.write(f"📄 **{item['filename']}**")
-                        # SQL timestamps are strings in JSON
-                        ts = pd.to_datetime(item['timestamp']).strftime('%Y-%m-%d %H:%M')
-                        col1.caption(f"Audit Date: {ts}")
-                        col2.metric("Waste Identified", f"${item['potential_savings']:,.2f}")
+                        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
                         
-                        # Delete functionality
-                        if col3.button("🗑️ Delete", key=f"del_{item['id']}"):
+                        # Column 1: Filename and Rename Option
+                        with col1:
+                            st.write(f"📄 **{item['filename']}**")
+                            ts = pd.to_datetime(item['timestamp']).strftime('%Y-%m-%d %H:%M')
+                            st.caption(f"Audit Date: {ts} | ID: {item['id']}")
+                            
+                            with st.expander("✏️ Rename"):
+                                new_name = st.text_input("New Name", value=item['filename'], key=f"input_{item['id']}")
+                                if st.button("Confirm Rename", key=f"ren_{item['id']}"):
+                                    # Calling the PATCH endpoint
+                                    ren_res = requests.patch(
+                                        f"http://backend:8000/rename-audit/{item['id']}?new_name={new_name}",
+                                        headers=get_auth_header()
+                                    )
+                                    if ren_res.status_code == 200:
+                                        st.rerun()
+
+                        # Column 2 & 3: Stats
+                        col2.metric("Waste", f"${item['potential_savings']:,.2f}")
+                        col3.metric("Total Spend", f"${item['total_spend']:,.2f}")
+                        
+                        # Column 4: Delete Action
+                        if col4.button("🗑️ Delete", key=f"del_{item['id']}", use_container_width=True):
                             del_res = requests.delete(
                                 f"http://backend:8000/delete-audit/{item['id']}", 
                                 headers=get_auth_header()
@@ -171,9 +182,9 @@ with history_tab:
                             if del_res.status_code == 200:
                                 st.rerun()
             else:
-                st.info("No saved audits yet. Upload a file to start!")
+                st.info("No saved audits yet.")
         else:
-            st.error("Could not retrieve history. Session may have expired.")
+            st.error("Session expired or server error.")
             
     except Exception as e:
         st.error(f"History connection error: {e}")
