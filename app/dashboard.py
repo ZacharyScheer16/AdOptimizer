@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import requests
+import io
 from datetime import datetime
 
 # --- 1. SESSION STATE INITIALIZATION ---
@@ -42,20 +43,23 @@ def show_auth_page():
         pwd = st.text_input("Password", type="password", key="login_pwd")
         
         if st.button("Sign In", type="primary", use_container_width=True):
+            # IMPORTANT: OAuth2PasswordRequestForm expects Form Data, not JSON
             payload = {"username": user, "password": pwd}
             try:
-                res = requests.post("http://backend:8000/login", json=payload)
-                data = res.json()
-                if data.get("status") == "success":
+                # We use 'data=' for form-encoded instead of 'json='
+                res = requests.post("http://backend:8000/login", data=payload)
+                
+                if res.status_code == 200:
+                    data = res.json()
                     st.session_state.logged_in = True
                     st.session_state.username = user
-                    # CRITICAL: Store the JWT token for future requests
+                    # Your backend returns 'access_token'
                     st.session_state.token = data.get("access_token")
                     st.rerun() 
                 else:
-                    st.error(data.get("message", "Invalid credentials."))
-            except Exception:
-                st.error("Backend Error: Is the backend container running?")
+                    st.error("Invalid credentials or server error.")
+            except Exception as e:
+                st.error(f"Backend Error: {e}")
 
     with signup_tab:
         st.subheader("Register New User")
@@ -65,12 +69,13 @@ def show_auth_page():
         if st.button("Register Account", use_container_width=True):
             payload = {"username": new_user, "password": new_pass}
             try:
+                # Signup still expects JSON based on your backend @app.post("/signup")
                 res = requests.post("http://backend:8000/signup", json=payload)
                 data = res.json()
-                if data.get("status") == "success":
+                if res.status_code == 200 and data.get("status") == "success":
                     st.success("Account created! You can now switch to the Login tab.")
                 else:
-                    st.error(data.get("message", "Signup failed."))
+                    st.error(data.get("detail", "Signup failed."))
             except Exception:
                 st.error("Backend connection lost.")
 
@@ -103,7 +108,6 @@ with main_tab:
         with st.spinner('AI Clustering & Auto-Saving...'):
             try:
                 files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "text/csv")}
-                # Pass the Token in the headers so the backend knows who is uploading
                 response = requests.post(
                     "http://backend:8000/upload-logistics", 
                     files=files, 
@@ -115,7 +119,7 @@ with main_tab:
                     results = full_payload["analysis"]
                     results_df = pd.DataFrame(results["detailed_results"])
                     
-                    st.success(f"File analyzed and saved to your history! (DB ID: {full_payload.get('database_id')})")
+                    st.success(f"File analyzed and saved! (DB ID: {full_payload.get('database_id')})")
 
                     m1, m2, m3, m4, m5 = st.columns(5)
                     m1.metric("Ads Analyzed", f"{len(results_df):,}")
@@ -126,7 +130,8 @@ with main_tab:
 
                     st.divider()
 
-                    fig = px.scatter(results_df, x="Spend", y="CPC", color="ad_group", template="plotly_white", title="Spend vs Cost-Per-Click")
+                    fig = px.scatter(results_df, x="Spend", y="CPC", color="ad_group", 
+                                   template="plotly_white", title="Spend vs Cost-Per-Click")
                     st.plotly_chart(fig, use_container_width=True)
 
                     with audit_tab:
@@ -143,34 +148,32 @@ with main_tab:
 with history_tab:
     st.subheader(f"Personal Audit History for {st.session_state.username}")
     try:
-        # We no longer pass the ID in the URL. The Header does the work!
-        history_url = "http://backend:8000/history"
-        h_res = requests.get(history_url, headers=get_auth_header())
+        h_res = requests.get("http://backend:8000/history", headers=get_auth_header())
         
         if h_res.status_code == 200:
             history_data = h_res.json()
             if history_data:
-                # Show most recent first
                 for item in reversed(history_data):
                     with st.container(border=True):
                         col1, col2, col3 = st.columns([3, 1, 1])
                         col1.write(f"📄 **{item['filename']}**")
-                        # Format the SQL timestamp
+                        # SQL timestamps are strings in JSON
                         ts = pd.to_datetime(item['timestamp']).strftime('%Y-%m-%d %H:%M')
                         col1.caption(f"Audit Date: {ts}")
                         col2.metric("Waste Identified", f"${item['potential_savings']:,.2f}")
                         
-                        '''if col3.button("🗑️ Delete", key=f"del_{item['id']}"):
+                        # Delete functionality
+                        if col3.button("🗑️ Delete", key=f"del_{item['id']}"):
                             del_res = requests.delete(
                                 f"http://backend:8000/delete-audit/{item['id']}", 
                                 headers=get_auth_header()
                             )
                             if del_res.status_code == 200:
-                                st.rerun()'''
+                                st.rerun()
             else:
                 st.info("No saved audits yet. Upload a file to start!")
         else:
-            st.error("Could not retrieve history. Token might be expired.")
+            st.error("Could not retrieve history. Session may have expired.")
             
     except Exception as e:
         st.error(f"History connection error: {e}")
