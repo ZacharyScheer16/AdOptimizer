@@ -24,6 +24,8 @@ st.markdown("""
         background-color: #ffffff; padding: 20px; border-radius: 12px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); border: 1px solid #e9ecef;
     }
+    .high-priority { border: 2px solid #ff4b4b !important; background-color: #fffafa; }
+    .low-priority { border: 1px solid #e9ecef !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -142,6 +144,13 @@ with main_tab:
 
 with history_tab:
     st.subheader(f"Personal Audit History for {st.session_state.username}")
+    
+    # --- GLOBAL FILTER UI ---
+    st.write("### 🎯 Targeting Filter")
+    target_threshold = st.slider("Min Savings Target ($)", 0.0, 1000.0, 100.0, 10.0)
+    st.caption(f"Showing which audits exceed ${target_threshold} in potential waste.")
+    st.divider()
+
     try:
         h_res = requests.get("http://backend:8000/history", headers=get_auth_header())
         
@@ -149,10 +158,21 @@ with history_tab:
             history_data = h_res.json()
             if history_data:
                 for item in reversed(history_data):
+                    # Fundamental: Call the Backend Filter Endpoint for each audit
+                    f_url = f"http://backend:8000/filter-details/{item['id']}?min_savings_target={target_threshold}"
+                    f_res = requests.get(f_url, headers=get_auth_header()).json()
+                    
+                    # Determine styling based on backend "status"
+                    is_high = f_res.get("status") == "high_priority"
+                    border_color = "#ff4b4b" if is_high else "#e9ecef"
+                    
                     with st.container(border=True):
+                        # Visual Cue: Red Label for High Risk
+                        if is_high:
+                            st.error(f"🔥 {f_res['message']}")
+                        
                         col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
                         
-                        # Column 1: Filename and Rename Option
                         with col1:
                             st.write(f"📄 **{item['filename']}**")
                             ts = pd.to_datetime(item['timestamp']).strftime('%Y-%m-%d %H:%M')
@@ -161,7 +181,6 @@ with history_tab:
                             with st.expander("✏️ Rename"):
                                 new_name = st.text_input("New Name", value=item['filename'], key=f"input_{item['id']}")
                                 if st.button("Confirm Rename", key=f"ren_{item['id']}"):
-                                    # Calling the PATCH endpoint
                                     ren_res = requests.patch(
                                         f"http://backend:8000/rename-audit/{item['id']}?new_name={new_name}",
                                         headers=get_auth_header()
@@ -169,11 +188,9 @@ with history_tab:
                                     if ren_res.status_code == 200:
                                         st.rerun()
 
-                        # Column 2 & 3: Stats
                         col2.metric("Waste", f"${item['potential_savings']:,.2f}")
                         col3.metric("Total Spend", f"${item['total_spend']:,.2f}")
                         
-                        # Column 4: Delete Action
                         if col4.button("🗑️ Delete", key=f"del_{item['id']}", use_container_width=True):
                             del_res = requests.delete(
                                 f"http://backend:8000/delete-audit/{item['id']}", 
