@@ -82,6 +82,46 @@ async def delete_audit(
     return {"message": "Deleted successfully"}
 
 
+#-------Audit Details -----------#
+@app.get("/filter-details/{audit_id}")
+async def filter_audit_details(
+    audit_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user),
+    min_savings_target: float = 100.0
+    
+):
+    audit = db.query(models.Audit).filter(
+        models.Audit.id == audit_id,
+        models.Audit.user_id == current_user.id
+    ).first()
+
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found or unauthorized")
+    
+    
+    if audit.potential_savings < min_savings_target:
+        return {
+            "status": "low_priority",
+            "message": f"Savings of ${audit.potential_savings:.2f} are below target."
+        }
+
+    return {
+        "status": "high_priority",
+        "message": "CRITICAL: Significant waste detected!",
+        "audit_data": {
+            "id": audit.id,
+            "filename": audit.filename,
+            "savings": audit.potential_savings,
+            "total_spend": audit.total_spend
+        }
+    }
+    
+
+    
+
+
+
 @app.patch("/rename-audit/{audit_id}")
 async def rename_audit(
     audit_id: int,
